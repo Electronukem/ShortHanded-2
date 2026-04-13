@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shorthanded — Real-time Shorthand OCR</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Header ── -->
+    <header id="top-bar">
+      <div id="logo">
+        <span class="logo-short">S/</span>
+        <span class="logo-full">Shorthanded</span>
+      </div>
+      <div id="toolbar">
+        <label class="tool-label" title="RDP epsilon — higher = fewer points">
+          RDP ε
+          <input type="range" id="rdp-epsilon" min="0.5" max="20" step="0.5" value="3" />
+          <span id="rdp-epsilon-val">3.0</span>
+        </label>
+        <label class="tool-label" title="Pen size">
+          Size
+          <input type="range" id="pen-size" min="1" max="12" step="1" value="3" />
+          <span id="pen-size-val">3</span>
+        </label>
+        <label class="tool-label toggle-label" title="Show simplified overlay">
+          <input type="checkbox" id="show-rdp" checked />
+          Show RDP
+        </label>
+        <label class="tool-label toggle-label" title="Smoothing (Catmull-Rom)">
+          <input type="checkbox" id="use-smooth" />
+          Smooth
+        </label>
+        <button id="btn-clear" class="btn btn-danger">Clear</button>
+        <button id="btn-calibrate" class="btn btn-calib">Calibrate Alphabet</button>
+        <button id="btn-run-tests" class="btn">Run RDP Tests</button>
+        <button id="btn-export" class="btn">Export JSON</button>
+      </div>
+    </header>
+
+    <!-- ── Main Layout ── -->
+    <main id="main-layout">
+
+      <!-- Canvas Column -->
+      <section id="canvas-col">
+        <div id="canvas-wrapper">
+          <canvas id="draw-canvas"></canvas>
+          <!-- RDP overlay rendered on top -->
+          <canvas id="rdp-canvas"></canvas>
+          <!-- Cluster boundary overlay -->
+          <canvas id="cluster-canvas"></canvas>
+          <!-- Calibration ghost letter (pointer-events:none, shown during calibration) -->
+          <div id="calib-ghost-layer" aria-hidden="true">
+            <span id="calib-ghost-letter"></span>
+          </div>
+        </div>
+
+        <!-- ── Calibration Control Bar (shown only during calibration) ── -->
+        <div id="calib-control-bar" hidden>
+          <div id="calib-info">
+            <span id="calib-step-label">Letter <strong id="calib-step-num">1</strong> / 26</span>
+            <span id="calib-current-letter"></span>
+            <span id="calib-hint">Draw the letter above on the canvas, then click Accept</span>
+          </div>
+          <div id="calib-progress-row">
+            <div id="calib-progress-track">
+              <div id="calib-progress-fill"></div>
+            </div>
+            <span id="calib-progress-text">0 / 26</span>
+          </div>
+          <div id="calib-buttons">
+            <button id="btn-calib-clear"  class="btn">Clear</button>
+            <button id="btn-calib-accept" class="btn btn-accent">Accept →</button>
+            <button id="btn-calib-cancel" class="btn btn-danger">✕ Cancel</button>
+          </div>
+        </div>
+
+        <!-- ── Real-time Prediction Box ── -->
+        <div id="prediction-bar" class="phase-empty">
+          <div id="prediction-label">LIVE PREDICTION</div>
+          <div id="prediction-display" class="phase-empty">—</div>
+          <div id="prediction-detail">
+            <div id="prediction-phase-tag"></div>
+            <div id="prediction-candidates-live"></div>
+          </div>
+          <div id="prediction-segments-display"></div>
+
+          <!-- DTW match row — hidden until a template match fires -->
+          <div id="dtw-match-row" class="dtw-hidden">
+            <span id="dtw-match-label">DTW</span>
+            <span id="dtw-match-text"></span>
+            <span id="dtw-match-bars"></span>
+            <span id="dtw-match-dist"></span>
+          </div>
+        </div>
+
+        <!-- ── Macro / Template Bar ── -->
+        <div id="macro-bar">
+          <button id="btn-save-template" class="btn btn-accent" title="Save the current drawing as a reusable macro template">
+            ＋ Save as Template
+          </button>
+          <div id="macro-bar-right">
+            <label class="tool-label" title="Maximum DTW distance to count as a match (lower = stricter)">
+              Threshold
+              <input type="range" id="dtw-threshold" min="0.02" max="0.80" step="0.01" value="0.25" />
+              <span id="dtw-threshold-val">0.25</span>
+            </label>
+            <span id="dtw-count-badge" class="dtw-count">0 templates</span>
+          </div>
+        </div>
+
+        <div id="canvas-statusbar">
+          <span id="status-points">Points: 0 raw / 0 simplified</span>
+          <span id="status-reduction">Reduction: —</span>
+          <span id="status-strokes">Strokes: 0</span>
+          <span id="status-clusters">Clusters: 0</span>
+        </div>
+
+        <!-- ── Shortcut Analysis Box ── -->
+        <div id="shortcut-box" hidden>
+          <div id="shortcut-box-header">
+            <div id="shortcut-box-title">
+              <span class="shortcut-box-icon">⚡</span>
+              SHORTCUT ANALYSIS
+            </div>
+            <div id="shortcut-box-meta">
+              <span id="shortcut-count-badge"></span>
+              <button id="btn-recalibrate" class="btn-sm">Re-Calibrate</button>
+            </div>
+          </div>
+          <div id="shortcut-chips-row"></div>
+          <div id="shortcut-live-match" hidden>
+            <span id="shortcut-live-icon">⚡</span>
+            <span id="shortcut-live-letter"></span>
+            <span id="shortcut-live-detail"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panels -->
+      <aside id="right-panel">
+
+        <div class="panel" id="panel-payload">
+          <div class="panel-header">
+            <span>OCR Payload</span>
+            <button class="btn-sm" id="btn-copy-payload">Copy</button>
+          </div>
+          <pre id="payload-output" class="panel-body code-out">(draw something…)</pre>
+        </div>
+
+        <div class="panel" id="panel-ocr">
+          <div class="panel-header">
+            <span>OCR Result</span>
+            <span id="ocr-status" class="badge badge-idle">idle</span>
+          </div>
+          <div id="ocr-result" class="panel-body ocr-out">—</div>
+          <div id="ocr-candidates" class="panel-body candidates-out"></div>
+        </div>
+
+        <div class="panel" id="panel-dict">
+          <div class="panel-header">
+            <span>Shorthand Dictionary</span>
+            <div style="display:flex;gap:4px">
+              <button class="btn-sm" id="btn-dict-export" title="Export dictionary as JSON">Export</button>
+              <button class="btn-sm" id="btn-dict-import" title="Import dictionary from JSON file">Import</button>
+            </div>
+          </div>
+          <div id="dict-list" class="panel-body dict-body">
+            <div id="dict-empty-msg" class="dict-empty">
+              No templates yet.<br>Draw something and click<br><strong>Save as Template</strong>.
+            </div>
+          </div>
+          <!-- Hidden file input for import -->
+          <input type="file" id="dict-import-file" accept=".json" style="display:none" />
+        </div>
+
+        <div class="panel" id="panel-log">
+          <div class="panel-header">
+            <span>Pipeline Log</span>
+            <button class="btn-sm" id="btn-clear-log">Clear</button>
+          </div>
+          <div id="log-output" class="panel-body log-out"></div>
+        </div>
+
+      </aside>
+    </main>
+
+  </div>
+
+  <!-- ── Scripts (modules, load order matters) ── -->
+  <script src="geometry-utils.js"></script>
+  <script src="rdp.js"></script>
+  <script src="stroke-engine.js"></script>
+  <script src="dtw.js"></script>
+  <script src="stroke-processor.js"></script>
+  <script src="ocr-service.js"></script>
+  <script src="calibration.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
